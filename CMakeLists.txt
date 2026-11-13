@@ -11,3 +11,8 @@ if(MSVC)
 else()
     target_compile_options(bminor PRIVATE -Wall -Wextra -Wpedantic)
 endif()
+
+enable_testing()
+add_executable(bminor_tests tests/tests.cpp)
+target_include_directories(bminor_tests PRIVATE src)
+add_test(NAME bminor_tests COMMAND bminor_tests)
