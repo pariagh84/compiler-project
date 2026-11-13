@@ -2,6 +2,8 @@
 #include "lexer.hpp"
 #include "ast.hpp"
 #include "parser.hpp"
+#include "highlighter.hpp"
+#include <regex>
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
@@ -52,6 +54,8 @@ main: function integer() = {
     puts("done");
     return -2^2;
 }
+
+
 )", "program");
     Parser parser(lexer.scan());
     auto tree = parser.parse();
@@ -84,10 +88,26 @@ main: function integer() = {
     check(!longParser.errors().empty() && longTree->children.back()->token.lexeme == "y", "bounded left-associated AST depth");
 }
 
+void highlighterTests() {
+    std::string source = "f: function void(); main: function integer() = { f(); x = f; (f)(); return 0; }\n";
+    Lexer lexer(source, "color");
+    auto tokens = lexer.scan();
+    Parser parser(tokens);
+    auto tree = parser.parse();
+    auto styles = classify(tokens, *tree, {});
+    std::vector<std::string> fStyles;
+    for (std::size_t i = 0; i < tokens.size(); ++i) if (tokens[i].lexeme == "f") fStyles.push_back(styles[i]);
+    check(fStyles == std::vector<std::string>({"fn", "fn", "id", "fn"}), "AST distinguishes calls from variable references");
+    std::ostringstream ansi;
+    writeAnsi(tokens, styles, ansi);
+    check(std::regex_replace(ansi.str(), std::regex("\033\\[[0-9;]*m"), "") == source, "ANSI preserves original source");
+}
+
 int main() {
     try {
         lexerTests();
         parserTests();
+        highlighterTests();
         Lexer expressions("a = b = 1 + 2 * 3 ^ 4 ^ 5", "expr");
         Parser expressionParser(expressions.scan());
         auto tree = expressionParser.expression();
