@@ -1,0 +1,9 @@
+main: function integer() = {
+    x: integer = ;
+    @;
+    print "unclosed
+    return 0;
+}
+
+after: integer = 7;
+/* unclosed comment

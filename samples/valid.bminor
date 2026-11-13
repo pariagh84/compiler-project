@@ -1,0 +1,25 @@
+// Functions, arrays and control flow
+square: function integer(value: integer) = {
+    return value ^ 2;
+}
+
+show: function void(values: array [] integer, size: integer) = {
+    i: integer;
+    for(i = 0; i < size; i++) {
+        print values[i], " ";
+    }
+    print "\n";
+}
+
+main: function integer() = {
+    numbers: array [4] integer = {1, 2, 3, 4};
+    result: integer = square(numbers[2]);
+    letter: char = '\n';
+    ready: boolean = true;
+    if(ready && result >= 9) {
+        show(numbers, 4);
+    } else {
+        print "not ready", letter;
+    }
+    return 0;
+}
