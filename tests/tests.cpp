@@ -1,5 +1,6 @@
 #include "diagnostic.hpp"
 #include "lexer.hpp"
+#include "ast.hpp"
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
@@ -42,6 +43,12 @@ void lexerTests() {
 int main() {
     try {
         lexerTests();
+        Node root("Program", {TokenKind::End, "", {"ast", 0, 1, 1}});
+        root.children.push_back(std::make_unique<Node>("Identifier", Token{TokenKind::Identifier, "x", {"ast", 0, 1, 1}}));
+        check(!root.inferredType.has_value(), "semantic type starts unset");
+        std::ostringstream ast;
+        printAst(root, ast);
+        check(ast.str().find("Identifier \"x\" @ 1:1") != std::string::npos, "AST inspection output");
         Token token{TokenKind::Identifier, "name", {"test.bminor", 0, 1, 1}};
         check(token.lexeme == "name", "token must preserve its text");
         std::ostringstream out;
