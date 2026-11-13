@@ -15,6 +15,19 @@ int precedence(const std::string& op) {
 }
 }
 
+Parser::DepthGuard::DepthGuard(Parser& parser) : parser(parser) {
+    if (parser.depth >= 128) parser.fail("nesting exceeds the analysis limit (128)");
+    ++parser.depth;
+}
+
+Parser::DepthGuard::~DepthGuard() { --parser.depth; }
+
+void Parser::attach(Node& parent, NodePtr child) {
+    if (child->height >= 256) fail("AST depth exceeds the analysis limit (256)");
+    parent.height = std::max(parent.height, child->height + 1);
+    parent.children.push_back(std::move(child));
+}
+
 Parser::Parser(const std::vector<Token>& input) {
     for (const auto& token : input) {
         if (token.kind != TokenKind::Whitespace && token.kind != TokenKind::Comment) tokens.push_back(token);
@@ -51,6 +64,7 @@ void Parser::fail(const std::string& message) {
 }
 
 NodePtr Parser::expression(int minimum) {
+    DepthGuard guard(*this);
     auto left = unary();
     while (precedence(peek().lexeme) >= minimum) {
         Token op = take();
@@ -59,17 +73,18 @@ NodePtr Parser::expression(int minimum) {
         auto right = expression(level + (rightAssociative ? 0 : 1));
         auto parent = std::make_unique<Node>("BinaryExpr", op);
         parent->location = left->location;
-        parent->children.push_back(std::move(left));
-        parent->children.push_back(std::move(right));
+        attach(*parent, std::move(left));
+        attach(*parent, std::move(right));
         left = std::move(parent);
     }
     return left;
 }
 
 NodePtr Parser::unary() {
+    DepthGuard guard(*this);
     if (peek().lexeme == "-" || peek().lexeme == "!") {
         auto node = std::make_unique<Node>("UnaryExpr", take());
-        node->children.push_back(unary());
+        attach(*node, unary());
         return node;
     }
     return postfix();
@@ -81,14 +96,14 @@ NodePtr Parser::postfix() {
         Token op = take();
         auto parent = std::make_unique<Node>(op.lexeme == "(" ? "CallExpr" : "IndexExpr", op);
         parent->location = node->location;
-        parent->children.push_back(std::move(node));
+        attach(*parent, std::move(node));
         if (op.lexeme == "(") {
             if (peek().lexeme != ")") {
-                do { parent->children.push_back(expression()); } while (match(","));
+                do { attach(*parent, expression()); } while (match(","));
             }
             expect(")");
         } else {
-            parent->children.push_back(expression());
+            attach(*parent, expression());
             expect("]");
         }
         node = std::move(parent);
@@ -96,7 +111,7 @@ NodePtr Parser::postfix() {
     if (peek().lexeme == "++" || peek().lexeme == "--") {
         auto parent = std::make_unique<Node>("PostfixExpr", take());
         parent->location = node->location;
-        parent->children.push_back(std::move(node));
+        attach(*parent, std::move(node));
         node = std::move(parent);
     }
     return node;
@@ -115,7 +130,7 @@ NodePtr Parser::primary() {
     }
     if (match("(")) {
         auto node = std::make_unique<Node>("GroupExpr", token);
-        node->children.push_back(expression());
+        attach(*node, expression());
         expect(")");
         return node;
     }
@@ -123,12 +138,22 @@ NodePtr Parser::primary() {
 }
 
 NodePtr Parser::parse() {
+    current = 0;
+    diagnostics.clear();
     auto program = std::make_unique<Node>("Program", peek());
-    while (peek().kind != TokenKind::End) program->children.push_back(declaration(true));
+    while (peek().kind != TokenKind::End) {
+        std::size_t start = current;
+        try { attach(*program, declaration(true)); }
+        catch (const ParseError&) {
+            attach(*program, std::make_unique<Node>("Error", tokens[start]));
+            synchronize(start, true);
+        }
+    }
     return program;
 }
 
 NodePtr Parser::type(bool parameter) {
+    DepthGuard guard(*this);
     Token token = take();
     auto node = std::make_unique<Node>("Type", token);
     if (token.lexeme == "integer" || token.lexeme == "boolean" ||
@@ -137,18 +162,18 @@ NodePtr Parser::type(bool parameter) {
         expect("[");
         if (peek().lexeme == "]") {
             if (!parameter) fail("array size is required outside parameters");
-            node->children.push_back(std::make_unique<Node>("Omitted", peek()));
-        } else node->children.push_back(expression());
+            attach(*node, std::make_unique<Node>("Omitted", peek()));
+        } else attach(*node, expression());
         expect("]");
-        node->children.push_back(type(parameter));
+        attach(*node, type(parameter));
         return node;
     }
     if (token.lexeme == "function") {
-        if (peek().lexeme == "void") node->children.push_back(std::make_unique<Node>("Type", take()));
+        if (peek().lexeme == "void") attach(*node, std::make_unique<Node>("Type", take()));
         else {
             if (peek().lexeme != "integer" && peek().lexeme != "boolean" &&
                 peek().lexeme != "char" && peek().lexeme != "string") fail("expected an atomic return type or void");
-            node->children.push_back(type());
+            attach(*node, type());
         }
         expect("(");
         if (peek().lexeme != ")") {
@@ -156,8 +181,8 @@ NodePtr Parser::type(bool parameter) {
                 if (peek().kind != TokenKind::Identifier) fail("expected a parameter name");
                 auto param = std::make_unique<Node>("ParamDecl", take());
                 expect(":");
-                param->children.push_back(type(true));
-                node->children.push_back(std::move(param));
+                attach(*param, type(true));
+                attach(*node, std::move(param));
             } while (match(","));
         }
         expect(")");
@@ -169,10 +194,11 @@ NodePtr Parser::type(bool parameter) {
 }
 
 NodePtr Parser::initializer() {
+    DepthGuard guard(*this);
     if (peek().lexeme != "{") return expression();
     auto node = std::make_unique<Node>("InitList", take());
     if (peek().lexeme != "}") {
-        do { node->children.push_back(initializer()); } while (match(","));
+        do { attach(*node, initializer()); } while (match(","));
     }
     expect("}");
     return node;
@@ -182,59 +208,68 @@ NodePtr Parser::declaration(bool global) {
     if (peek().kind != TokenKind::Identifier) fail("expected a declaration name");
     auto node = std::make_unique<Node>("VarDecl", take());
     expect(":");
-    node->children.push_back(type());
+    attach(*node, type());
     bool function = node->children[0]->token.lexeme == "function";
     if (function) node->kind = "FuncDecl";
     if (match("=")) {
         if (function) {
             if (!global) fail("function definitions cannot be nested");
-            node->children.push_back(block());
+            attach(*node, block());
             return node;
         }
-        node->children.push_back(initializer());
+        attach(*node, initializer());
     }
     expect(";");
     return node;
 }
 
 NodePtr Parser::block() {
+    DepthGuard guard(*this);
     auto node = std::make_unique<Node>("BlockStmt", expect("{"));
-    while (peek().kind != TokenKind::End && peek().lexeme != "}") node->children.push_back(statement());
+    while (peek().kind != TokenKind::End && peek().lexeme != "}") {
+        std::size_t start = current;
+        try { attach(*node, statement()); }
+        catch (const ParseError&) {
+            attach(*node, std::make_unique<Node>("Error", tokens[start]));
+            synchronize(start, false);
+        }
+    }
     expect("}");
     return node;
 }
 
 NodePtr Parser::statement() {
+    DepthGuard guard(*this);
     Token token = peek();
     if (token.lexeme == "{") return block();
     if (token.kind == TokenKind::Identifier && peek(1).lexeme == ":") return declaration(false);
     if (match("if")) {
         auto node = std::make_unique<Node>("IfStmt", token);
         expect("(");
-        node->children.push_back(expression());
+        attach(*node, expression());
         expect(")");
-        node->children.push_back(statement());
+        attach(*node, statement());
         // An else always belongs to the nearest unmatched if.
-        if (match("else")) node->children.push_back(statement());
+        if (match("else")) attach(*node, statement());
         return node;
     }
     if (match("for")) {
         auto node = std::make_unique<Node>("ForStmt", token);
         expect("(");
         for (const std::string separator : {";", ";", ")"}) {
-            if (peek().lexeme == separator) node->children.push_back(std::make_unique<Node>("Omitted", peek()));
-            else node->children.push_back(expression());
+            if (peek().lexeme == separator) attach(*node, std::make_unique<Node>("Omitted", peek()));
+            else attach(*node, expression());
             expect(separator);
         }
-        node->children.push_back(statement());
+        attach(*node, statement());
         return node;
     }
     if (match("return") || match("print")) {
         auto node = std::make_unique<Node>(token.lexeme == "return" ? "ReturnStmt" : "PrintStmt", token);
         if (peek().lexeme != ";") {
-            node->children.push_back(expression());
+            attach(*node, expression());
             if (token.lexeme == "print") {
-                while (match(",")) node->children.push_back(expression());
+                while (match(",")) attach(*node, expression());
             }
         }
         expect(";");
@@ -242,7 +277,34 @@ NodePtr Parser::statement() {
     }
     if (match(";")) return std::make_unique<Node>("EmptyStmt", token);
     auto node = std::make_unique<Node>("ExprStmt", token);
-    node->children.push_back(expression());
+    attach(*node, expression());
     expect(";");
     return node;
+}
+
+void Parser::synchronize(std::size_t start, bool global) {
+    int braces = 0;
+    for (std::size_t i = start; i < current; ++i) {
+        if (tokens[i].lexeme == "{") ++braces;
+        if (tokens[i].lexeme == "}" && braces > 0) --braces;
+    }
+    while (peek().kind != TokenKind::End) {
+        const std::string text = peek().lexeme;
+        if (braces == 0) {
+            if (text == ";") { take(); return; }
+            if (text == "}") {
+                if (global) take();
+                return;
+            }
+            bool declarationStart = peek().kind == TokenKind::Identifier && peek(1).lexeme == ":";
+            bool statementStart = text == "if" || text == "for" || text == "return" || text == "print";
+            if (current > start && (declarationStart || (!global && statementStart))) return;
+        }
+        take();
+        if (text == "{") ++braces;
+        if (text == "}" && braces > 0) {
+            --braces;
+            if (braces == 0) return;
+        }
+    }
 }

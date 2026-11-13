@@ -61,6 +61,27 @@ main: function integer() = {
     check(body->children[2]->children[3]->children[1]->children.size() == 3, "else binds to inner if");
     auto& power = body->children.back()->children[0];
     check(power->kind == "BinaryExpr" && power->children[0]->kind == "UnaryExpr", "unary negation binds before exponentiation");
+
+    Lexer broken("main: function integer() = { x: integer = ; @; return 7; } later: integer;", "broken");
+    Parser recovery(broken.scan());
+    auto recovered = recovery.parse();
+    check(recovery.errors().size() == 2, "report multiple syntax errors");
+    check(recovered->children.back()->token.lexeme == "later", "recover later global declaration");
+    check(recovered->children[0]->children[1]->children.back()->kind == "ReturnStmt", "recover later statement");
+    Lexer missing("main: function void() = { x = 1 return; }", "missing");
+    Parser missingParser(missing.scan());
+    auto missingTree = missingParser.parse();
+    check(missingTree->children[0]->children[1]->children.back()->kind == "ReturnStmt", "synchronize on return after missing semicolon");
+    Lexer deep("x: integer = " + std::string(5000, '(') + "1" + std::string(5000, ')') + "; y: integer;", "deep");
+    Parser deepParser(deep.scan());
+    auto deepTree = deepParser.parse();
+    check(!deepParser.errors().empty() && deepTree->children.back()->token.lexeme == "y", "bounded recursion and recovery");
+    std::string chain = "x: integer = 0";
+    for (int i = 0; i < 5000; ++i) chain += "+1";
+    Lexer longLexer(chain + "; y: integer;", "chain");
+    Parser longParser(longLexer.scan());
+    auto longTree = longParser.parse();
+    check(!longParser.errors().empty() && longTree->children.back()->token.lexeme == "y", "bounded left-associated AST depth");
 }
 
 int main() {

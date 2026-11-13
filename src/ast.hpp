@@ -12,6 +12,7 @@ struct Node {
     Token token;
     Location location;
     std::optional<std::string> inferredType;
+    std::size_t height = 1;
     std::vector<std::unique_ptr<Node>> children;
 
     Node(std::string kind, const Token& token)

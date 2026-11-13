@@ -16,6 +16,12 @@ private:
     std::vector<Token> tokens;
     std::size_t current = 0;
     std::vector<Diagnostic> diagnostics;
+    std::size_t depth = 0;
+    struct DepthGuard {
+        Parser& parser;
+        explicit DepthGuard(Parser& parser);
+        ~DepthGuard();
+    };
 
     const Token& peek(std::size_t ahead = 0) const;
     Token take();
@@ -30,4 +36,6 @@ private:
     NodePtr statement();
     NodePtr block();
     NodePtr initializer();
+    void attach(Node& parent, NodePtr child);
+    void synchronize(std::size_t start, bool global);
 };
