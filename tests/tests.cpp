@@ -7,8 +7,12 @@
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
+#include <random>
+
+int checks = 0;
 
 void check(bool condition, const char* message) {
+    ++checks;
     if (!condition) throw std::runtime_error(message);
 }
 
@@ -112,11 +116,64 @@ void highlighterTests() {
     check(html.str().find("<pre><code>") != std::string::npos, "standalone preformatted HTML output");
 }
 
+void corpusTests() {
+    const std::vector<std::string> valid = {
+        "", "// empty program", "flag: boolean = true;", "s: string = \"\";",
+        "f: function void();", "f: function void() = { print; return; ; }",
+        "f: function void(a: array [] array [] integer) = { a[0][0]--; }",
+        "f: function void(cb: function integer(x: integer)) = { cb(1); }",
+        "x: integer = a || b && c == d < e + f * g ^ -h;",
+        "x: integer = 9223372036854775808;" // Range validation belongs to semantic analysis.
+    };
+    for (const auto& source : valid) {
+        Lexer lexer(source, "valid");
+        Parser parser(lexer.scan());
+        parser.parse();
+        check(lexer.errors().empty() && parser.errors().empty(), "valid corpus input rejected");
+    }
+    const std::vector<std::string> invalid = {
+        "x integer;", "x: void;", "a: array [] integer;", "x: integer = +2;",
+        "f: function array [2] integer();", "f: function void() = { while(true) {} }",
+        "f: function void() = { g: function void() = {} }", "x: integer = 1.2;",
+        "x: integer = f(1,);", "x: char = '';", "if: integer;",
+        "f: function void() = { ++x; }", "f: function void() = { else return; }",
+        "f: function void() = {", "}", "x: integer = a[ ];"
+    };
+    for (const auto& source : invalid) {
+        Lexer lexer(source, "invalid");
+        Parser parser(lexer.scan());
+        parser.parse();
+        check(!lexer.errors().empty() || !parser.errors().empty(), "invalid corpus input accepted");
+    }
+    std::mt19937 random(2026);
+    const std::string alphabet = "ab01_{}[]();,:=+-*/^!&|<>\"'@ \n\r\t";
+    for (int trial = 0; trial < 2000; ++trial) {
+        std::string source;
+        std::size_t length = random() % 180;
+        for (std::size_t i = 0; i < length; ++i) source += alphabet[random() % alphabet.size()];
+        if (trial % 2) source = "main: function void() = {" + source + "}";
+        Lexer lexer(source, "random");
+        auto tokens = lexer.scan();
+        std::string rebuilt;
+        for (const auto& token : tokens) {
+            check(token.location.offset == rebuilt.size(), "token offsets must partition the source");
+            rebuilt += token.lexeme;
+        }
+        check(rebuilt == source, "random source must round-trip through lexer");
+        Parser parser(tokens);
+        auto tree = parser.parse();
+        std::ostringstream ansi;
+        writeAnsi(tokens, classify(tokens, *tree, parser.errors()), ansi);
+        check(std::regex_replace(ansi.str(), std::regex("\033\\[[0-9;]*m"), "") == source, "random ANSI round trip");
+    }
+}
+
 int main() {
     try {
         lexerTests();
         parserTests();
         highlighterTests();
+        corpusTests();
         Lexer expressions("a = b = 1 + 2 * 3 ^ 4 ^ 5", "expr");
         Parser expressionParser(expressions.scan());
         auto tree = expressionParser.expression();
@@ -137,7 +194,7 @@ int main() {
         std::ostringstream out;
         out << Diagnostic{token.location, "lexer", "unknown character"};
         check(out.str() == "test.bminor:1:1: lexer: unknown character", "diagnostic location");
-        std::cout << "All tests passed\n";
+        std::cout << checks << " checks passed, including 2000 deterministic random inputs\n";
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;
