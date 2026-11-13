@@ -101,6 +101,15 @@ void highlighterTests() {
     std::ostringstream ansi;
     writeAnsi(tokens, styles, ansi);
     check(std::regex_replace(ansi.str(), std::regex("\033\\[[0-9;]*m"), "") == source, "ANSI preserves original source");
+    Lexer markup("// <script>alert(1)</script> & \"quotes\"\r\n", "html");
+    auto markupTokens = markup.scan();
+    Parser markupParser(markupTokens);
+    auto markupTree = markupParser.parse();
+    std::ostringstream html;
+    writeHtml(markupTokens, classify(markupTokens, *markupTree, {}), html);
+    check(html.str().find("<script>") == std::string::npos, "source cannot create HTML elements");
+    check(html.str().find("&lt;script&gt;") != std::string::npos && html.str().find("&amp;") != std::string::npos, "HTML escaping");
+    check(html.str().find("<pre><code>") != std::string::npos, "standalone preformatted HTML output");
 }
 
 int main() {

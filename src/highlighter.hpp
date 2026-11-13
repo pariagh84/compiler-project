@@ -6,3 +6,4 @@
 std::vector<std::string> classify(const std::vector<Token>& tokens, const Node& root,
                                 const std::vector<Diagnostic>& diagnostics);
 void writeAnsi(const std::vector<Token>& tokens, const std::vector<std::string>& styles, std::ostream& out);
+void writeHtml(const std::vector<Token>& tokens, const std::vector<std::string>& styles, std::ostream& out);
