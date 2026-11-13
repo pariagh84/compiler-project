@@ -41,9 +41,32 @@ void lexerTests() {
     check(zero.scan()[0].kind == TokenKind::Invalid, "embedded NUL is not EOF");
 }
 
+void parserTests() {
+    Lexer lexer(R"(
+puts: function void(s: string);
+data: array [2] array [2] integer = {{1,2},{3,4}};
+main: function integer() = {
+    i: integer = 0;
+    for(i=0; i<2; i++) { print data[i][0], "\n"; }
+    for(;;) if(true) if(false) return 1; else return 2;
+    puts("done");
+    return -2^2;
+}
+)", "program");
+    Parser parser(lexer.scan());
+    auto tree = parser.parse();
+    check(parser.errors().empty(), "valid declarations and statements");
+    check(tree->children.size() == 3, "all global declarations retained");
+    auto& body = tree->children[2]->children[1];
+    check(body->children[2]->children[3]->children[1]->children.size() == 3, "else binds to inner if");
+    auto& power = body->children.back()->children[0];
+    check(power->kind == "BinaryExpr" && power->children[0]->kind == "UnaryExpr", "unary negation binds before exponentiation");
+}
+
 int main() {
     try {
         lexerTests();
+        parserTests();
         Lexer expressions("a = b = 1 + 2 * 3 ^ 4 ^ 5", "expr");
         Parser expressionParser(expressions.scan());
         auto tree = expressionParser.expression();

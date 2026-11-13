@@ -8,6 +8,7 @@ class Parser {
 public:
     explicit Parser(const std::vector<Token>& input);
     NodePtr expression(int minimum = 1);
+    NodePtr parse();
     const std::vector<Diagnostic>& errors() const { return diagnostics; }
 
 private:
@@ -24,4 +25,9 @@ private:
     NodePtr unary();
     NodePtr postfix();
     NodePtr primary();
+    NodePtr type(bool parameter = false);
+    NodePtr declaration(bool global);
+    NodePtr statement();
+    NodePtr block();
+    NodePtr initializer();
 };
