@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-add_library(bminor_core src/lexer.cpp src/ast.cpp)
+add_library(bminor_core src/lexer.cpp src/ast.cpp src/parser.cpp)
 target_include_directories(bminor_core PUBLIC src)
 add_executable(bminor src/main.cpp)
 target_link_libraries(bminor PRIVATE bminor_core)

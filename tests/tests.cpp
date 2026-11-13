@@ -1,6 +1,7 @@
 #include "diagnostic.hpp"
 #include "lexer.hpp"
 #include "ast.hpp"
+#include "parser.hpp"
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
@@ -43,6 +44,15 @@ void lexerTests() {
 int main() {
     try {
         lexerTests();
+        Lexer expressions("a = b = 1 + 2 * 3 ^ 4 ^ 5", "expr");
+        Parser expressionParser(expressions.scan());
+        auto tree = expressionParser.expression();
+        check(tree->token.lexeme == "=" && tree->children[1]->token.lexeme == "=", "right associative assignment");
+        auto& sum = tree->children[1]->children[1];
+        check(sum->token.lexeme == "+" && sum->children[1]->token.lexeme == "*", "multiplication before addition");
+        auto& power = sum->children[1]->children[1];
+        check(power->token.lexeme == "^" && power->children[1]->token.lexeme == "^", "right associative power");
+        check(sum->location.column == 9, "binary node starts at its left operand");
         Node root("Program", {TokenKind::End, "", {"ast", 0, 1, 1}});
         root.children.push_back(std::make_unique<Node>("Identifier", Token{TokenKind::Identifier, "x", {"ast", 0, 1, 1}}));
         check(!root.inferredType.has_value(), "semantic type starts unset");
